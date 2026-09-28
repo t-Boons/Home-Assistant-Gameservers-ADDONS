@@ -5,7 +5,7 @@ description: >
   Automatically installs Java, accepts the Minecraft EULA,
   downloads the selected server version and stores all data
   persistently in /share.
-version: "0.0.2"
+version: "0.0.3"
 
 arch:
   - amd64
