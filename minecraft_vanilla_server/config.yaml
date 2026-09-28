@@ -20,8 +20,11 @@ host_network: false
 # Der Host-Port kann im HA UI geändert werden
 ports:
   25565/tcp: 25565
+  25575/tcp: 25575
+
 ports_description:
   25565/tcp: "Minecraft server port (container fixed to 25565)"
+  25575/tcp: "Minecraft RCON port"
 
 map:
   - share:rw
