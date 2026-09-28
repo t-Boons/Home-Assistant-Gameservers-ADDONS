@@ -39,7 +39,7 @@ mkdir -p "${LOG_DIR}"
 # -----------------------------------------------------------
 # Java 21 automatisch installieren (Temurin)
 # -----------------------------------------------------------
-JRE_DIR="${DATA_DIR}/.jre/21"
+JRE_DIR="${DATA_DIR}/.jre/25"
 JAVA_HOME="${JRE_DIR}"
 JAVA_BIN="${JAVA_HOME}/bin/java"
 
@@ -48,7 +48,7 @@ install_java() {
     return 0
   fi
 
-  log_info "Java 21 nicht gefunden – installiere Temurin JRE"
+  log_info "Java 25 nicht gefunden – installiere Temurin JRE"
 
   local arch adoptium_arch
   arch="$(uname -m)"
@@ -63,7 +63,7 @@ install_java() {
 
   mkdir -p "${JRE_DIR}"
   TMP="/tmp/jre21.tar.gz"
-  URL="https://api.adoptium.net/v3/binary/latest/21/ga/linux/${adoptium_arch}/jre/hotspot/normal/eclipse?project=jdk"
+  URL="https://api.adoptium.net/v3/binary/latest/25/ga/linux/${adoptium_arch}/jre/hotspot/normal/eclipse?project=jdk"
 
   curl -fL --retry 3 --retry-delay 2 "${URL}" -o "${TMP}"
   rm -rf "${JRE_DIR:?}/"*
