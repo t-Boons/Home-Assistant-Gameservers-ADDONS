@@ -114,7 +114,9 @@ install_modpack() {
 
   log_info "Lade Modpack herunter"
   rm -rf /tmp/modpack /tmp/modpack.zip
-  curl -fL --retry 3 --retry-delay 2 "${MODPACK_URL}" -o /tmp/modpack.zip
+  curl -fL --retry 3 --retry-delay 2 \
+  -A "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36" \
+  "${MODPACK_URL}" -o /tmp/modpack.zip
   mkdir -p /tmp/modpack
   unzip -q /tmp/modpack.zip -d /tmp/modpack
 
