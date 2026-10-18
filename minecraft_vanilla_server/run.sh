@@ -66,13 +66,13 @@ install_java() {
   esac
 
   mkdir -p "${JRE_DIR}"
-  TMP="/tmp/jre.tar.gz"
-  URL="https://api.adoptium.net/v3/binary/latest/${JAVA_VERSION}/ga/linux/${adoptium_arch}/jre/hotspot/normal/eclipse?project=jdk"
+  local tmp="/tmp/jre.tar.gz"
+  local url="https://api.adoptium.net/v3/binary/latest/${JAVA_VERSION}/ga/linux/${adoptium_arch}/jre/hotspot/normal/eclipse?project=jdk"
 
-  curl -fL --retry 3 --retry-delay 2 "${URL}" -o "${TMP}"
+  curl -fL --retry 3 --retry-delay 2 "${url}" -o "${tmp}"
   rm -rf "${JRE_DIR:?}/"*
-  tar -xzf "${TMP}" -C "${JRE_DIR}" --strip-components=1
-  rm -f "${TMP}"
+  tar -xzf "${tmp}" -C "${JRE_DIR}" --strip-components=1
+  rm -f "${tmp}"
 
   [[ -x "${JAVA_BIN}" ]] || { log_error "Java Installation fehlgeschlagen"; exit 1; }
 }
@@ -93,7 +93,8 @@ ensure_unzip() {
   if command -v apk >/dev/null 2>&1; then
     apk add --no-cache unzip
   elif command -v apt-get >/dev/null 2>&1; then
-    apt-get update && apt-get install -y unzip
+    DEBIAN_FRONTEND=noninteractive apt-get update
+    DEBIAN_FRONTEND=noninteractive apt-get install -y unzip
   else
     log_error "unzip fehlt und konnte nicht installiert werden"
     exit 1
@@ -101,7 +102,100 @@ ensure_unzip() {
 }
 
 # -----------------------------------------------------------
-# Modpack installieren (CurseForge Server Pack ZIP)
+# Loader erkennen (Fabric / Forge / NeoForge)
+# -----------------------------------------------------------
+LOADER=""
+LOADER_VER=""
+PACK_MC=""
+
+detect_loader() {
+  LOADER=""; LOADER_VER=""; PACK_MC=""
+
+  # 1) manifest.json (falls vorhanden)
+  if [[ -f manifest.json ]]; then
+    PACK_MC="$(jq -r '.minecraft.version // empty' manifest.json)"
+    local id
+    id="$(jq -r '.minecraft.modLoaders[0].id // empty' manifest.json)"
+    if [[ -n "${id}" ]]; then
+      LOADER="${id%%-*}"
+      LOADER_VER="${id#*-}"
+    fi
+  fi
+
+  # 2) Sonst anhand der Mod-JARs erkennen
+  if [[ -z "${LOADER}" ]]; then
+    local f=0 n=0 g=0 jar list
+    for jar in mods/*.jar; do
+      [[ -e "${jar}" ]] || continue
+      list="$(unzip -l "${jar}" 2>/dev/null || true)"
+      grep -q 'fabric.mod.json' <<<"${list}" && f=$((f+1))
+      grep -q 'META-INF/neoforge.mods.toml' <<<"${list}" && n=$((n+1))
+      grep -q 'META-INF/mods.toml' <<<"${list}" && g=$((g+1))
+    done
+    if (( f > 0 && f >= n && f >= g )); then LOADER="fabric"
+    elif (( n > 0 && n >= g )); then LOADER="neoforge"
+    elif (( g > 0 )); then LOADER="forge"
+    fi
+  fi
+
+  # 3) Minecraft-Version aus der Konfiguration, falls nicht im Manifest
+  if [[ -z "${PACK_MC}" && "${MC_VERSION}" != "latest" ]]; then
+    PACK_MC="${MC_VERSION}"
+  fi
+
+  if [[ -z "${LOADER}" ]]; then
+    log_error "Konnte den Mod-Loader nicht erkennen (kein manifest.json, keine Mods gefunden)"
+    exit 1
+  fi
+  if [[ -z "${PACK_MC}" ]]; then
+    log_error "Minecraft-Version unbekannt – bitte 'mc_version' in der Add-on-Konfiguration setzen"
+    exit 1
+  fi
+  log_info "Erkannt: ${LOADER} ${LOADER_VER:-(neueste)} für Minecraft ${PACK_MC}"
+}
+
+install_loader() {
+  local mc="${PACK_MC}"
+  case "${LOADER}" in
+    fabric)
+      local inst lv="${LOADER_VER}"
+      inst="$(curl -fsSL https://meta.fabricmc.net/v2/versions/installer | jq -r '[.[]|select(.stable)][0].version')"
+      if [[ -z "${lv}" ]]; then
+        lv="$(curl -fsSL "https://meta.fabricmc.net/v2/versions/loader/${mc}" | jq -r '[.[]|select(.loader.stable)][0].loader.version')"
+      fi
+      curl -fL "https://meta.fabricmc.net/v2/versions/loader/${mc}/${lv}/${inst}/server/jar" -o fabric-server-launch.jar
+      ;;
+    forge)
+      local fv="${LOADER_VER}"
+      if [[ -z "${fv}" ]]; then
+        fv="$(curl -fsSL https://files.minecraftforge.net/net/minecraftforge/forge/promotions_slim.json | jq -r --arg k "${mc}-latest" '.promos[$k] // empty')"
+      fi
+      [[ -z "${fv}" ]] && { log_error "Keine Forge-Version für ${mc} gefunden"; exit 1; }
+      curl -fL "https://maven.minecraftforge.net/net/minecraftforge/forge/${mc}-${fv}/forge-${mc}-${fv}-installer.jar" -o loader-installer.jar
+      java -jar loader-installer.jar --installServer
+      rm -f loader-installer.jar
+      ;;
+    neoforge)
+      local nv="${LOADER_VER}"
+      if [[ -z "${nv}" ]]; then
+        local prefix="${mc#1.}"
+        [[ "${prefix}" != *.* ]] && prefix="${prefix}.0"
+        nv="$(curl -fsSL https://maven.neoforged.net/api/maven/versions/releases/net/neoforged/neoforge | jq -r --arg p "${prefix}." '[.versions[]|select(startswith($p))|select(contains("-")|not)]|last // empty')"
+      fi
+      [[ -z "${nv}" ]] && { log_error "Keine NeoForge-Version für ${mc} gefunden"; exit 1; }
+      curl -fL "https://maven.neoforged.net/releases/net/neoforged/neoforge/${nv}/neoforge-${nv}-installer.jar" -o loader-installer.jar
+      java -jar loader-installer.jar --installServer
+      rm -f loader-installer.jar
+      ;;
+    *)
+      log_error "Nicht unterstützter Loader: ${LOADER}"
+      exit 1
+      ;;
+  esac
+}
+
+# -----------------------------------------------------------
+# Modpack installieren (Server-Pack ZIP)
 # -----------------------------------------------------------
 install_modpack() {
   local marker=".modpack_url.txt"
@@ -110,28 +204,29 @@ install_modpack() {
     return 0
   fi
 
-  
-
   ensure_unzip
 
   log_info "Lade Modpack herunter"
   rm -rf /tmp/modpack /tmp/modpack.zip
   curl -fL --retry 3 --retry-delay 2 \
-  -A "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36" \
-  "${MODPACK_URL}" -o /tmp/modpack.zip
+    -A "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36" \
+    "${MODPACK_URL}" -o /tmp/modpack.zip
+
   if ! unzip -tq /tmp/modpack.zip >/dev/null 2>&1; then
-  log_error "Download ist kein gültiges ZIP. Anfang der Datei:"
-  head -c 300 /tmp/modpack.zip
-  echo
-  rm -f /tmp/modpack.zip
-  exit 1
-fi
+    log_error "Download ist kein gültiges ZIP. Anfang der Datei:"
+    head -c 300 /tmp/modpack.zip || true
+    echo
+    rm -f /tmp/modpack.zip
+    exit 1
+  fi
+
   mkdir -p /tmp/modpack
   unzip -q /tmp/modpack.zip -d /tmp/modpack
 
-  # Alte Mods/Configs entfernen (Welt & server.properties bleiben erhalten)
-  log_info "Entferne alte Mods und Configs"
-  rm -rf mods config defaultconfigs kubejs libraries
+  # Alten Loader, Mods und Configs entfernen (Welt & server.properties bleiben erhalten)
+  log_info "Entferne alte Mods, Configs und Loader"
+  rm -rf mods config defaultconfigs kubejs libraries versions .fabric
+  rm -f run.sh user_jvm_args.txt fabric-server-launch.jar server.jar
 
   # Falls die ZIP nur einen Unterordner enthält, diesen verwenden
   local entries=(/tmp/modpack/*)
@@ -142,12 +237,24 @@ fi
   fi
   rm -rf /tmp/modpack /tmp/modpack.zip
 
-  # Forge/NeoForge Installer ausführen, falls vorhanden
-  local installer
-  installer="$(ls *installer*.jar 2>/dev/null | head -n1 || true)"
-  if [[ -n "${installer}" && ! -f run.sh ]]; then
-    log_info "Führe Installer aus: ${installer}"
-    java -jar "${installer}" --installServer
+  if [[ ! -d mods && -d overrides ]]; then
+    log_error "Das ist ein Client-Pack (overrides/, keine Mods). Bitte das Server-Pack verwenden."
+    exit 1
+  fi
+
+  # Loader installieren, falls das Pack keinen eigenen Start mitbringt
+  if [[ ! -f run.sh && ! -f fabric-server-launch.jar ]]; then
+    local installer
+    installer="$(ls *installer*.jar 2>/dev/null | head -n1 || true)"
+    if [[ -n "${installer}" ]]; then
+      log_info "Führe Installer aus: ${installer}"
+      java -jar "${installer}" --installServer
+    elif ls start*.sh >/dev/null 2>&1; then
+      log_info "Pack bringt eigenes Startskript mit"
+    else
+      detect_loader
+      install_loader
+    fi
   fi
 
   echo "${MODPACK_URL}" > "${marker}"
@@ -259,8 +366,6 @@ if [[ -n "${MODPACK_URL}" ]]; then
   elif [[ -f fabric-server-launch.jar ]]; then   # Fabric
     exec java -jar fabric-server-launch.jar nogui 2>&1 | tee -a "${LOG_FILE}"
   else
-    log_warn "Kein run.sh / fabric-server-launch.jar gefunden. Inhalt von ${DATA_DIR}:"
-    ls -la
     START_SH="$(ls start*.sh 2>/dev/null | head -n1 || true)"
     FORGE_JAR="$(ls forge-*.jar neoforge-*.jar 2>/dev/null | grep -vi installer | head -n1 || true)"
     if [[ -n "${START_SH}" ]]; then
@@ -269,14 +374,11 @@ if [[ -n "${MODPACK_URL}" ]]; then
     elif [[ -n "${FORGE_JAR}" ]]; then
       log_info "Nutze ${FORGE_JAR}"
       exec java -jar "${FORGE_JAR}" nogui 2>&1 | tee -a "${LOG_FILE}"
-    elif [[ -f server.jar ]]; then
-      exec java -jar server.jar nogui 2>&1 | tee -a "${LOG_FILE}"
     else
-      log_error "Kein Startskript im Modpack gefunden"
+      log_error "Kein Startskript gefunden. Inhalt von ${DATA_DIR}:"
+      ls -la
       exit 1
     fi
-  fi
-    exit 1
   fi
 else
   exec java -jar "${SERVER_JAR}" nogui 2>&1 | tee -a "${LOG_FILE}"
