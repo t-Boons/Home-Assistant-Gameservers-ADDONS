@@ -110,6 +110,8 @@ install_modpack() {
     return 0
   fi
 
+  
+
   ensure_unzip
 
   log_info "Lade Modpack herunter"
@@ -117,6 +119,13 @@ install_modpack() {
   curl -fL --retry 3 --retry-delay 2 \
   -A "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36" \
   "${MODPACK_URL}" -o /tmp/modpack.zip
+  if ! unzip -tq /tmp/modpack.zip >/dev/null 2>&1; then
+  log_error "Download ist kein gültiges ZIP. Anfang der Datei:"
+  head -c 300 /tmp/modpack.zip
+  echo
+  rm -f /tmp/modpack.zip
+  exit 1
+fi
   mkdir -p /tmp/modpack
   unzip -q /tmp/modpack.zip -d /tmp/modpack
 
