@@ -5,7 +5,7 @@ description: >
   Runs vanilla or a CurseForge modpack. Automatically installs Java,
   accepts the Minecraft EULA, downloads the selected server version
   and stores all data persistently in /share.
-version: "0.0.11"
+version: "0.0.12"
 
 arch:
   - amd64
