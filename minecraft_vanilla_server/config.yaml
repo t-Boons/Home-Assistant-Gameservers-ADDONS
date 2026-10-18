@@ -1,11 +1,11 @@
-name: "Minecraft Vanilla or Forge Dedicated Server"
+name: "Minecraft Vanilla Dedicated Server"
 slug: minecraft_vanilla_server
 description: >
   Minecraft Dedicated Server for Home Assistant OS.
   Runs vanilla or a CurseForge modpack. Automatically installs Java,
   accepts the Minecraft EULA, downloads the selected server version
   and stores all data persistently in /share.
-version: "0.0.10"
+version: "0.0.11"
 
 arch:
   - amd64
@@ -16,8 +16,8 @@ boot: auto
 init: false
 host_network: false
 
-# Container läuft IMMER auf 25565
-# Der Host-Port kann im HA UI geändert werden
+# Container always runs on 25565
+# The host port can be changed in the HA UI
 ports:
   25565/tcp: 25565
   25575/tcp: 25575
@@ -36,18 +36,22 @@ options:
   xms_mb: 4096
   xmx_mb: 8192
 
-  # Java Version (z.B. 17, 21, 25) - muss zur Minecraft/Modpack Version passen
+  # Java version (e.g. 17, 21, 25) - must match the Minecraft / modpack version
   java_version: "25"
 
-  # "latest" oder z.B. "1.21.1" (nur Vanilla)
+  # "latest" or e.g. "1.21.1" (vanilla only, or fallback for modpacks without manifest.json)
   mc_version: "latest"
 
-  # Optional: feste Server-JAR URL (überschreibt mc_version, nur Vanilla)
+  # Optional: fixed server JAR URL (overrides mc_version, vanilla only)
   server_jar_url: ""
 
-  # Optional: direkter Link zu einer CurseForge Server-Pack ZIP
-  # (überschreibt mc_version und server_jar_url). Leer lassen für Vanilla.
+  # Optional: direct link to a modpack ZIP (server pack or client pack).
+  # Overrides mc_version and server_jar_url. Leave empty for vanilla.
   modpack_url: ""
+
+  # Optional: free CurseForge API key (https://console.curseforge.com).
+  # Only needed for client packs, to download the mods listed in manifest.json.
+  curseforge_api_key: ""
 
 schema:
   data_dir: str
@@ -57,3 +61,4 @@ schema:
   mc_version: str
   server_jar_url: str?
   modpack_url: str?
+  curseforge_api_key: password?
