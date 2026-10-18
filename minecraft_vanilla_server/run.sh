@@ -11,7 +11,7 @@ log_warn()  { echo -e "${YELLOW}[WARN]${NC} $*"; }
 log_error() { echo -e "${RED}[ERROR]${NC} $*"; }
 
 echo "-----------------------------------------------------------"
-echo " Minecraft Vanilla Dedicated Server (Home Assistant Add-on)"
+echo " Minecraft Dedicated Server (Home Assistant Add-on)"
 echo "-----------------------------------------------------------"
 
 # -----------------------------------------------------------
@@ -22,10 +22,14 @@ XMS_MB="$(jq -r '.xms_mb' /data/options.json)"
 XMX_MB="$(jq -r '.xmx_mb' /data/options.json)"
 MC_VERSION="$(jq -r '.mc_version' /data/options.json)"
 SERVER_JAR_URL="$(jq -r '.server_jar_url' /data/options.json)"
+MODPACK_URL="$(jq -r '.modpack_url // ""' /data/options.json)"
+JAVA_VERSION="$(jq -r '.java_version // "25"' /data/options.json)"
 
 [[ "${DATA_DIR}" == "null" || -z "${DATA_DIR}" ]] && DATA_DIR="/share/minecraft-vanilla"
 [[ "${MC_VERSION}" == "null" || -z "${MC_VERSION}" ]] && MC_VERSION="latest"
 [[ "${SERVER_JAR_URL}" == "null" ]] && SERVER_JAR_URL=""
+[[ "${MODPACK_URL}" == "null" ]] && MODPACK_URL=""
+[[ "${JAVA_VERSION}" == "null" || -z "${JAVA_VERSION}" ]] && JAVA_VERSION="25"
 
 CONTAINER_PORT="25565"
 
@@ -37,9 +41,9 @@ LOG_FILE="${LOG_DIR}/ha_console.log"
 mkdir -p "${LOG_DIR}"
 
 # -----------------------------------------------------------
-# Java 21 automatisch installieren (Temurin)
+# Java automatisch installieren (Temurin)
 # -----------------------------------------------------------
-JRE_DIR="${DATA_DIR}/.jre/25"
+JRE_DIR="${DATA_DIR}/.jre/${JAVA_VERSION}"
 JAVA_HOME="${JRE_DIR}"
 JAVA_BIN="${JAVA_HOME}/bin/java"
 
@@ -48,7 +52,7 @@ install_java() {
     return 0
   fi
 
-  log_info "Java 25 nicht gefunden – installiere Temurin JRE"
+  log_info "Java ${JAVA_VERSION} nicht gefunden – installiere Temurin JRE"
 
   local arch adoptium_arch
   arch="$(uname -m)"
@@ -62,8 +66,8 @@ install_java() {
   esac
 
   mkdir -p "${JRE_DIR}"
-  TMP="/tmp/jre21.tar.gz"
-  URL="https://api.adoptium.net/v3/binary/latest/25/ga/linux/${adoptium_arch}/jre/hotspot/normal/eclipse?project=jdk"
+  TMP="/tmp/jre.tar.gz"
+  URL="https://api.adoptium.net/v3/binary/latest/${JAVA_VERSION}/ga/linux/${adoptium_arch}/jre/hotspot/normal/eclipse?project=jdk"
 
   curl -fL --retry 3 --retry-delay 2 "${URL}" -o "${TMP}"
   rm -rf "${JRE_DIR:?}/"*
@@ -79,7 +83,68 @@ export PATH="${JAVA_HOME}/bin:${PATH}"
 log_info "Java Version: $(java -version 2>&1 | head -n1)"
 
 # -----------------------------------------------------------
-# Server-JAR ermitteln (Mojang piston-meta)
+# unzip sicherstellen (für Modpacks)
+# -----------------------------------------------------------
+ensure_unzip() {
+  if command -v unzip >/dev/null 2>&1; then
+    return 0
+  fi
+  log_info "unzip nicht gefunden – versuche Installation"
+  if command -v apk >/dev/null 2>&1; then
+    apk add --no-cache unzip
+  elif command -v apt-get >/dev/null 2>&1; then
+    apt-get update && apt-get install -y unzip
+  else
+    log_error "unzip fehlt und konnte nicht installiert werden"
+    exit 1
+  fi
+}
+
+# -----------------------------------------------------------
+# Modpack installieren (CurseForge Server Pack ZIP)
+# -----------------------------------------------------------
+install_modpack() {
+  local marker=".modpack_url.txt"
+  if [[ -f "${marker}" && "$(cat "${marker}")" == "${MODPACK_URL}" ]]; then
+    log_info "Modpack unverändert – überspringe Installation"
+    return 0
+  fi
+
+  ensure_unzip
+
+  log_info "Lade Modpack herunter"
+  rm -rf /tmp/modpack /tmp/modpack.zip
+  curl -fL --retry 3 --retry-delay 2 "${MODPACK_URL}" -o /tmp/modpack.zip
+  mkdir -p /tmp/modpack
+  unzip -q /tmp/modpack.zip -d /tmp/modpack
+
+  # Alte Mods/Configs entfernen (Welt & server.properties bleiben erhalten)
+  log_info "Entferne alte Mods und Configs"
+  rm -rf mods config defaultconfigs kubejs libraries
+
+  # Falls die ZIP nur einen Unterordner enthält, diesen verwenden
+  local entries=(/tmp/modpack/*)
+  if [[ ${#entries[@]} -eq 1 && -d "${entries[0]}" ]]; then
+    cp -a "${entries[0]}"/. .
+  else
+    cp -a /tmp/modpack/. .
+  fi
+  rm -rf /tmp/modpack /tmp/modpack.zip
+
+  # Forge/NeoForge Installer ausführen, falls vorhanden
+  local installer
+  installer="$(ls *installer*.jar 2>/dev/null | head -n1 || true)"
+  if [[ -n "${installer}" && ! -f run.sh ]]; then
+    log_info "Führe Installer aus: ${installer}"
+    java -jar "${installer}" --installServer
+  fi
+
+  echo "${MODPACK_URL}" > "${marker}"
+  log_info "Modpack installiert"
+}
+
+# -----------------------------------------------------------
+# Server-JAR ermitteln (Mojang piston-meta) – nur Vanilla
 # -----------------------------------------------------------
 SERVER_JAR="server.jar"
 
@@ -105,24 +170,33 @@ get_version_jar() {
   echo "$vjson" | jq -r '.downloads.server.url'
 }
 
-if [[ -n "${SERVER_JAR_URL}" ]]; then
-  JAR_URL="${SERVER_JAR_URL}"
-  log_info "Nutze benutzerdefinierte Server-JAR URL"
-else
-  if [[ "${MC_VERSION}" == "latest" ]]; then
-    JAR_URL="$(get_latest_jar)"
-    log_info "Nutze neueste Minecraft-Version"
+install_vanilla() {
+  local jar_url
+  if [[ -n "${SERVER_JAR_URL}" ]]; then
+    jar_url="${SERVER_JAR_URL}"
+    log_info "Nutze benutzerdefinierte Server-JAR URL"
   else
-    JAR_URL="$(get_version_jar "${MC_VERSION}")"
-    log_info "Nutze Minecraft-Version ${MC_VERSION}"
+    if [[ "${MC_VERSION}" == "latest" ]]; then
+      jar_url="$(get_latest_jar)"
+      log_info "Nutze neueste Minecraft-Version"
+    else
+      jar_url="$(get_version_jar "${MC_VERSION}")"
+      log_info "Nutze Minecraft-Version ${MC_VERSION}"
+    fi
   fi
-fi
 
-URL_MARKER=".server_jar_url.txt"
-if [[ ! -f "${SERVER_JAR}" || ! -f "${URL_MARKER}" || "$(cat "${URL_MARKER}")" != "${JAR_URL}" ]]; then
-  log_info "Lade Server-JAR herunter"
-  curl -fL --retry 3 --retry-delay 2 "${JAR_URL}" -o "${SERVER_JAR}"
-  echo "${JAR_URL}" > "${URL_MARKER}"
+  local url_marker=".server_jar_url.txt"
+  if [[ ! -f "${SERVER_JAR}" || ! -f "${url_marker}" || "$(cat "${url_marker}")" != "${jar_url}" ]]; then
+    log_info "Lade Server-JAR herunter"
+    curl -fL --retry 3 --retry-delay 2 "${jar_url}" -o "${SERVER_JAR}"
+    echo "${jar_url}" > "${url_marker}"
+  fi
+}
+
+if [[ -n "${MODPACK_URL}" ]]; then
+  install_modpack
+else
+  install_vanilla
 fi
 
 # -----------------------------------------------------------
@@ -148,7 +222,13 @@ fi
 # -----------------------------------------------------------
 export JAVA_TOOL_OPTIONS="-Xms${XMS_MB}M -Xmx${XMX_MB}M"
 
-log_info "Starte Minecraft Vanilla Server"
+if [[ -n "${MODPACK_URL}" ]]; then
+  MODE="Modpack"
+else
+  MODE="Vanilla"
+fi
+
+log_info "Starte Minecraft Server (${MODE})"
 log_info "Port (Container): ${CONTAINER_PORT}"
 log_info "RAM             : Xms=${XMS_MB}M / Xmx=${XMX_MB}M"
 log_info "Datenverzeichnis: ${DATA_DIR}"
@@ -158,8 +238,19 @@ echo "-----------------------------------------------------------"
 {
   echo ""
   echo "==================== $(date -Iseconds) ===================="
-  echo "Minecraft Vanilla | Port ${CONTAINER_PORT} | Xms/Xmx ${XMS_MB}/${XMX_MB} MB"
+  echo "Minecraft ${MODE} | Port ${CONTAINER_PORT} | Xms/Xmx ${XMS_MB}/${XMX_MB} MB"
   echo "==========================================================="
 } >> "${LOG_FILE}"
 
-exec java -jar "${SERVER_JAR}" nogui 2>&1 | tee -a "${LOG_FILE}"
+if [[ -n "${MODPACK_URL}" ]]; then
+  if [[ -f run.sh ]]; then                       # neues Forge / NeoForge
+    exec bash run.sh nogui 2>&1 | tee -a "${LOG_FILE}"
+  elif [[ -f fabric-server-launch.jar ]]; then   # Fabric
+    exec java -jar fabric-server-launch.jar nogui 2>&1 | tee -a "${LOG_FILE}"
+  else
+    log_error "Kein Startskript im Modpack gefunden (run.sh / fabric-server-launch.jar)"
+    exit 1
+  fi
+else
+  exec java -jar "${SERVER_JAR}" nogui 2>&1 | tee -a "${LOG_FILE}"
+fi
