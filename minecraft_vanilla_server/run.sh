@@ -199,7 +199,8 @@ install_loader() {
 # -----------------------------------------------------------
 install_modpack() {
   local marker=".modpack_url.txt"
-  if [[ -f "${marker}" && "$(cat "${marker}")" == "${MODPACK_URL}" ]]; then
+  if [[ -f "${marker}" && "$(cat "${marker}")" == "${MODPACK_URL}" ]] && \
+     { [[ -f run.sh || -f fabric-server-launch.jar ]] || ls start*.sh >/dev/null 2>&1 || ls forge-*.jar neoforge-*.jar >/dev/null 2>&1; }; then
     log_info "Modpack unverändert – überspringe Installation"
     return 0
   fi
