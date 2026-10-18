@@ -259,7 +259,23 @@ if [[ -n "${MODPACK_URL}" ]]; then
   elif [[ -f fabric-server-launch.jar ]]; then   # Fabric
     exec java -jar fabric-server-launch.jar nogui 2>&1 | tee -a "${LOG_FILE}"
   else
-    log_error "Kein Startskript im Modpack gefunden (run.sh / fabric-server-launch.jar)"
+    log_warn "Kein run.sh / fabric-server-launch.jar gefunden. Inhalt von ${DATA_DIR}:"
+    ls -la
+    START_SH="$(ls start*.sh 2>/dev/null | head -n1 || true)"
+    FORGE_JAR="$(ls forge-*.jar neoforge-*.jar 2>/dev/null | grep -vi installer | head -n1 || true)"
+    if [[ -n "${START_SH}" ]]; then
+      log_info "Nutze ${START_SH}"
+      exec bash "${START_SH}" 2>&1 | tee -a "${LOG_FILE}"
+    elif [[ -n "${FORGE_JAR}" ]]; then
+      log_info "Nutze ${FORGE_JAR}"
+      exec java -jar "${FORGE_JAR}" nogui 2>&1 | tee -a "${LOG_FILE}"
+    elif [[ -f server.jar ]]; then
+      exec java -jar server.jar nogui 2>&1 | tee -a "${LOG_FILE}"
+    else
+      log_error "Kein Startskript im Modpack gefunden"
+      exit 1
+    fi
+  fi
     exit 1
   fi
 else
