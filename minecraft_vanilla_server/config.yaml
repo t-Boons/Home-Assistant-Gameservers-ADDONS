@@ -5,7 +5,7 @@ description: >
   Automatically installs Java, accepts the Minecraft EULA,
   downloads the selected server version and stores all data
   persistently in /share.
-version: "0.0.3"
+version: "0.0.4"
 
 arch:
   - amd64
@@ -33,8 +33,8 @@ options:
   data_dir: "/share/minecraft-vanilla"
 
   # RAM (MB)
-  xms_mb: 1024
-  xmx_mb: 4096
+  xms_mb: 4096
+  xmx_mb: 8192
 
   # "latest" oder z.B. "1.21.1"
   mc_version: "latest"
