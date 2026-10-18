@@ -1,11 +1,11 @@
-name: "Minecraft Vanilla Dedicated Server"
+name: "Minecraft Vanilla or Forge Dedicated Server"
 slug: minecraft_vanilla_server
 description: >
-  Minecraft Vanilla Dedicated Server for Home Assistant OS.
-  Automatically installs Java, accepts the Minecraft EULA,
-  downloads the selected server version and stores all data
-  persistently in /share.
-version: "0.0.4"
+  Minecraft Dedicated Server for Home Assistant OS.
+  Runs vanilla or a CurseForge modpack. Automatically installs Java,
+  accepts the Minecraft EULA, downloads the selected server version
+  and stores all data persistently in /share.
+version: "0.0.5"
 
 arch:
   - amd64
@@ -36,15 +36,24 @@ options:
   xms_mb: 4096
   xmx_mb: 8192
 
-  # "latest" oder z.B. "1.21.1"
+  # Java Version (z.B. 17, 21, 25) - muss zur Minecraft/Modpack Version passen
+  java_version: "25"
+
+  # "latest" oder z.B. "1.21.1" (nur Vanilla)
   mc_version: "latest"
 
-  # Optional: feste Server-JAR URL (überschreibt mc_version)
+  # Optional: feste Server-JAR URL (überschreibt mc_version, nur Vanilla)
   server_jar_url: ""
+
+  # Optional: direkter Link zu einer CurseForge Server-Pack ZIP
+  # (überschreibt mc_version und server_jar_url). Leer lassen für Vanilla.
+  modpack_url: ""
 
 schema:
   data_dir: str
   xms_mb: int
   xmx_mb: int
+  java_version: str
   mc_version: str
   server_jar_url: str?
+  modpack_url: str?
