@@ -409,7 +409,7 @@ fi
 # -----------------------------------------------------------
 # Start
 # -----------------------------------------------------------
-export JAVA_TOOL_OPTIONS="-Xms${XMS_MB}M -Xmx${XMX_MB}M"
+export JAVA_TOOL_OPTIONS="-Xms${XMS_MB}M -Xmx${XMX_MB}M -Djava.net.preferIPv4Stack=true"
 
 if [[ -n "${MODPACK_URL}" ]]; then
   MODE="Modpack"
